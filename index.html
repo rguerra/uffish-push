@@ -20,8 +20,8 @@
 </div>
 <div id="done" hidden>
   <p class="ok"><b>This device is ready.</b></p>
-  <p>One step left, on your computer: copy this device's code, then paste it in Obsidian under Settings &rarr; Uffish &rarr; Integrations &rarr; Push enrollment &rarr; <b>Enroll a device</b>. You do this once, for all your vaults.</p>
-  <p><button id="copy">Copy code</button><button id="test" class="plain">Show a test notification</button></p>
+  <p>One step left: get this device's code to your computer. Tap <b>Send to my computer</b> and choose your computer under AirDrop. Then, in Obsidian there, in <b>any vault</b> (it makes no difference which), open Settings &rarr; Uffish &rarr; Integrations &rarr; Push enrollment and press <b>Add from AirDrop</b>. You do this once: the phone is added to the computer, for all your vaults.</p>
+  <p><button id="send">Send to my computer</button><button id="copy" class="plain">Copy code</button><button id="test" class="plain">Show a test notification</button></p>
   <details><summary class="dim">Show the code</summary><pre id="out"></pre></details>
 </div>
 <p id="status"></p>
@@ -45,6 +45,18 @@
     const json = JSON.stringify(sub.toJSON());
     $('out').textContent = json;
     $('copy').onclick = () => navigator.clipboard.writeText(json).then(() => status('Copied. Paste it in Obsidian on your computer.', 'ok'), () => status('Could not copy. Open "Show the code" and copy it by hand.', 'err'));
+    $('send').onclick = async () => {
+      const file = new File([json], 'uffish-device.txt', { type: 'text/plain' });
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+        else if (navigator.share) await navigator.share({ text: json });
+        else { status('This browser cannot share. Use Copy code and paste it on your computer instead.', 'err'); return; }
+        status('Sent. On your computer, press Add from AirDrop on the Push enrollment card.', 'ok');
+      } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        status('Could not share (' + String(error) + '). Use Copy code and paste it on your computer instead.', 'err');
+      }
+    };
     $('test').onclick = () => {
       if (Notification.permission !== 'granted') { status('Notifications are switched off for this app in this device\u2019s settings.', 'err'); return; }
       registration.showNotification('Uffish', { body: 'Test from this device. Notifications are on.' }).then(() => status('Test shown. If nothing appeared, notifications are off for this app in this device\u2019s settings.'), (e) => status(String(e), 'err'));
