@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="./manifest.webmanifest">
+<title>Uffish notifications</title>
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 34rem; margin: 2.5rem auto; padding: 0 1rem; background:#f7f7f4; color:#22262e; }
+  button { font: inherit; padding: .6em 1.2em; margin: 0 .4em .4em 0; border-radius: 6px; border: 1px solid #29527E; background: #29527E; color: white; }
+  button.plain { background: transparent; color: #29527E; }
+  pre { background: #eceae2; padding: .8em; border-radius: 6px; font-size: .78rem; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #2F7D4B; } .err { color: #A83C3C; } .dim { color: #6b7078; font-size: .85rem; }
+</style>
+<h1>Uffish notifications</h1>
+<div id="install" hidden>
+  <p><b>Add this page to your Home Screen first.</b> Tap Share, then <b>Add to Home Screen</b>, then open <b>Uffish</b> from the new icon. iPhone and iPad only allow notifications from there.</p>
+</div>
+<div id="enroll" hidden>
+  <p>Let this device receive notifications from Uffish on your computer.</p>
+  <p><button id="go">Turn on notifications</button></p>
+</div>
+<div id="done" hidden>
+  <p class="ok"><b>This device is ready.</b></p>
+  <p>One step left, on your computer: copy this device's code, then paste it in Obsidian under Settings &rarr; Uffish &rarr; Integrations &rarr; Push enrollment &rarr; <b>Enroll a device</b>. You do this once, for all your vaults.</p>
+  <p><button id="copy">Copy code</button><button id="test" class="plain">Show a test notification</button></p>
+  <details><summary class="dim">Show the code</summary><pre id="out"></pre></details>
+</div>
+<p id="status"></p>
+<p class="dim">Sender key <span id="key"></span></p>
+<script>
+  const VAPID_PUBLIC_KEY = "BFUDFtL17QVXFJrol7HBtxJKCm7-lGAMSWzWE97PK5tRIWJtJ5m7M8Cr7lylWPUrJ9DBwiehCGYQKFYFle243p0";
+  const $ = (id) => document.getElementById(id);
+  const status = (msg, cls) => { $('status').textContent = msg; $('status').className = cls || ''; };
+  const show = (id) => { for (const s of ['install', 'enroll', 'done']) $(s).hidden = s !== id; };
+  const b64uToBytes = (s) => {
+    const pad = '='.repeat((4 - (s.length % 4)) % 4);
+    const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  };
+  const bytesToB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  $('key').textContent = VAPID_PUBLIC_KEY.slice(0, 12) + '\u2026';
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  let registration = null;
+  const ready = (sub) => {
+    const json = JSON.stringify(sub.toJSON());
+    $('out').textContent = json;
+    $('copy').onclick = () => navigator.clipboard.writeText(json).then(() => status('Copied. Paste it in Obsidian on your computer.', 'ok'), () => status('Could not copy. Open "Show the code" and copy it by hand.', 'err'));
+    $('test').onclick = () => {
+      if (Notification.permission !== 'granted') { status('Notifications are switched off for this app in this device\u2019s settings.', 'err'); return; }
+      registration.showNotification('Uffish', { body: 'Test from this device. Notifications are on.' }).then(() => status('Test shown. If nothing appeared, notifications are off for this app in this device\u2019s settings.'), (e) => status(String(e), 'err'));
+    };
+    show('done');
+  };
+  const start = async () => {
+    if (ios && !installed) { show('install'); return; }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) { status('This browser cannot receive push notifications.', 'err'); return; }
+    registration = await navigator.serviceWorker.register('./sw.js');
+    const existing = await registration.pushManager.getSubscription();
+    const madeWith = existing && existing.options && existing.options.applicationServerKey ? bytesToB64u(existing.options.applicationServerKey) : VAPID_PUBLIC_KEY;
+    if (existing && madeWith === VAPID_PUBLIC_KEY) { ready(existing); return; }
+    if (existing) { await existing.unsubscribe(); status('The sender key changed, so this device needs to turn notifications on again.'); }
+    show('enroll');
+  };
+  $('go').onclick = async () => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { status('Notifications were not allowed (' + perm + '). Allow them for this app in this device\u2019s settings, then try again.', 'err'); return; }
+      status('Subscribing\u2026');
+      await navigator.serviceWorker.ready;
+      const sub = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_PUBLIC_KEY) });
+      status('');
+      ready(sub);
+    } catch (error) {
+      status(String(error), 'err');
+    }
+  };
+  start().catch((error) => status(String(error), 'err'));
+</script>
