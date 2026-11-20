@@ -11,6 +11,10 @@
   .ok { color: #2F7D4B; } .err { color: #A83C3C; } .dim { color: #6b7078; font-size: .85rem; }
 </style>
 <h1>Uffish notifications</h1>
+<div id="nokey" hidden>
+  <p><b>This page needs the code from your computer.</b></p>
+  <p id="nokey-how"></p>
+</div>
 <div id="install" hidden>
   <p><b>Add this page to your Home Screen first.</b> Tap Share, then <b>Add to Home Screen</b>, then open <b>Uffish</b> from the new icon. iPhone and iPad only allow notifications from there.</p>
 </div>
@@ -27,17 +31,25 @@
 <p id="status"></p>
 <p class="dim">Sender key <span id="key"></span></p>
 <script>
-  const VAPID_PUBLIC_KEY = "BFUDFtL17QVXFJrol7HBtxJKCm7-lGAMSWzWE97PK5tRIWJtJ5m7M8Cr7lylWPUrJ9DBwiehCGYQKFYFle243p0";
   const $ = (id) => document.getElementById(id);
   const status = (msg, cls) => { $('status').textContent = msg; $('status').className = cls || ''; };
-  const show = (id) => { for (const s of ['install', 'enroll', 'done']) $(s).hidden = s !== id; };
+  const show = (id) => { for (const s of ['nokey', 'install', 'enroll', 'done']) $(s).hidden = s !== id; };
+  // The computer's PUBLIC key: from the link, else what an earlier visit kept.
+  const isKey = (k) => typeof k === 'string' && /^[A-Za-z0-9_-]{86,88}$/.test(k);
+  const kept = () => { try { return localStorage.getItem('uffish_k'); } catch (e) { return null; } };
+  const cookieKey = () => (document.cookie.match(/(?:^|; )uffish_k=([^;]+)/) || [])[1];
+  const VAPID_PUBLIC_KEY = [new URLSearchParams(location.search).get('k'), kept(), cookieKey()].find(isKey) || '';
+  if (VAPID_PUBLIC_KEY) {
+    try { localStorage.setItem('uffish_k', VAPID_PUBLIC_KEY); } catch (e) { /* private mode: the link and the cookie still carry it */ }
+    document.cookie = 'uffish_k=' + VAPID_PUBLIC_KEY + '; path=' + location.pathname.replace(/[^/]*$/, '') + '; max-age=31536000; secure; samesite=lax';
+  }
   const b64uToBytes = (s) => {
     const pad = '='.repeat((4 - (s.length % 4)) % 4);
     const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
     return Uint8Array.from(raw, (c) => c.charCodeAt(0));
   };
   const bytesToB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  $('key').textContent = VAPID_PUBLIC_KEY.slice(0, 12) + '\u2026';
+  $('key').textContent = VAPID_PUBLIC_KEY ? VAPID_PUBLIC_KEY.slice(0, 12) + '\u2026' : 'not set';
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
   let registration = null;
@@ -64,6 +76,13 @@
     show('done');
   };
   const start = async () => {
+    if (!VAPID_PUBLIC_KEY) {
+      $('nokey-how').textContent = installed
+        ? 'This app was added without it. Delete this icon, then on your computer open Obsidian \u2192 Settings \u2192 Uffish \u2192 Integrations \u2192 Push enrollment, scan the code shown there with this device\u2019s camera, and add the page to the Home Screen again.'
+        : 'On your computer, open Obsidian \u2192 Settings \u2192 Uffish \u2192 Integrations \u2192 Push enrollment and scan the code shown there with this device\u2019s camera.';
+      show('nokey');
+      return;
+    }
     if (ios && !installed) { show('install'); return; }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) { status('This browser cannot receive push notifications.', 'err'); return; }
     registration = await navigator.serviceWorker.register('./sw.js');
